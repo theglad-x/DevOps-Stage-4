@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    environment:
+      - VITE_AUTH_API_URL=${AUTH_API_ADDRESS}
+      - VITE_TODOS_API_URL=${TODOS_API_ADDRESS}
+      - VITE_USERS_API_URL=${USERS_API_ADDRESS}
+    depends_on:
+      - auth-api
+      - todos-api
+      - users-api
+
+  redis-queue:
+    image: redis:alpine3.21
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  auth-api:
+    build: ./auth-api
+    ports:
+      - "${AUTH_API_PORT}:8081"
+    environment:
+      - AUTH_API_PORT=${AUTH_API_PORT}
+      - JWT_SECRET=${JWT_SECRET}
+      - USERS_API_ADDRESS=${USERS_API_ADDRESS}
+    depends_on:
+      - users-api
+
+  todos-api:
+    build: ./todos-api
+    ports:
+      - "${TODO_API_PORT}:8082"
+    environment:
+      - TODO_API_PORT=${TODO_API_PORT}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - JWT_SECRET=${JWT_SECRET}
+      - REDIS_CHANNEL=${REDIS_CHANNEL}
+    depends_on:
+      - redis-queue
+
+  users-api:
+    build: ./users-api
+    ports:
+      - "${SERVER_PORT}:8083"
+    environment:
+      - SERVER_PORT=${SERVER_PORT}
+      - JWT_SECRET=${JWT_SECRET}
+
+  log-message-processor:
+    build: ./log-message-processor
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_CHANNEL=${REDIS_CHANNEL}
+    depends_on:
+      - redis-queue
+
+volumes:
+  redis_data:
