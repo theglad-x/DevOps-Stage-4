@@ -1,66 +1,123 @@
 version: '3.8'
 
 services:
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml
+      - ./traefik/acme.json:/letsencrypt/acme.json
+    networks:
+      - todos-app-network
+    labels:
+      - "traefik.enable=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      # HTTP to HTTPS redirection
+      - "traefik.http.routers.http-catchall.rule=HostRegexp(`{any:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      # TLS settings
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      # Let's Encrypt settings
+      - "--certificatesresolvers.myresolver.acme.email=ugerondu@gmail.com"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.glad.name.ng`)"
+
   frontend:
     build: ./frontend
-    ports:
-      - "8080:80"
-    environment:
-      - VITE_AUTH_API_URL=${AUTH_API_ADDRESS}
-      - VITE_TODOS_API_URL=${TODOS_API_ADDRESS}
-      - VITE_USERS_API_URL=${USERS_API_ADDRESS}
+    env_file:
+      - .env
+    networks:
+      - todos-app-network
     depends_on:
       - auth-api
       - todos-api
       - users-api
-
-  redis-queue:
-    image: redis:alpine3.21
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`glad.name.ng`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.routers.frontend.tls.certresolver=myresolver"
 
   auth-api:
     build: ./auth-api
-    ports:
-      - "${AUTH_API_PORT}:8081"
-    environment:
-      - AUTH_API_PORT=${AUTH_API_PORT}
-      - JWT_SECRET=${JWT_SECRET}
-      - USERS_API_ADDRESS=${USERS_API_ADDRESS}
+    env_file:
+      - .env
+    networks:
+      - todos-app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=Host(`auth.glad.name.ng`) || PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth.entrypoints=websecure"
+      - "traefik.http.routers.auth.tls=true"
+      - "traefik.http.routers.auth.tls.certresolver=myresolver"
     depends_on:
       - users-api
 
   todos-api:
     build: ./todos-api
-    ports:
-      - "${TODO_API_PORT}:8082"
-    environment:
-      - TODO_API_PORT=${TODO_API_PORT}
-      - REDIS_HOST=${REDIS_HOST}
-      - REDIS_PORT=${REDIS_PORT}
-      - JWT_SECRET=${JWT_SECRET}
-      - REDIS_CHANNEL=${REDIS_CHANNEL}
+    env_file:
+      - .env
+    networks:
+      - todos-app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.todos.rule=Host(`todos.glad.name.ng`) || PathPrefix(`/api/todos`)"
+      - "traefik.http.routers.todos.entrypoints=websecure"
+      - "traefik.http.routers.todos.tls=true"
+      - "traefik.http.routers.todos.tls.certresolver=myresolver"
     depends_on:
       - redis-queue
 
   users-api:
     build: ./users-api
-    ports:
-      - "${SERVER_PORT}:8083"
-    environment:
-      - SERVER_PORT=${SERVER_PORT}
-      - JWT_SECRET=${JWT_SECRET}
+    env_file:
+      - .env
+    networks:
+      - todos-app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.users.rule=Host(`users.glad.name.ng`) || PathPrefix(`/api/users`)"
+      - "traefik.http.routers.users.entrypoints=websecure"
+      - "traefik.http.routers.users.tls=true"
+      - "traefik.http.routers.users.tls.certresolver=myresolver"
+
+  redis-queue:
+    image: redis:alpine
+    labels:
+      - "traefik.enable=false"
+    volumes:
+      - redis_data:/data
 
   log-message-processor:
     build: ./log-message-processor
-    environment:
-      - REDIS_HOST=${REDIS_HOST}
-      - REDIS_PORT=${REDIS_PORT}
-      - REDIS_CHANNEL=${REDIS_CHANNEL}
+    labels:
+      - "traefik.enable=false"
+    env_file:
+      - .env
     depends_on:
       - redis-queue
+
+  zipkin:
+    image: openzipkin/zipkin
+    ports:
+      - "9411:9411"
+    networks:
+      - todos-app-network
+
+networks:
+  todos-app-network:
+    driver: bridge
 
 volumes:
   redis_data:
