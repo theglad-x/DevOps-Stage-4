@@ -1,123 +1,164 @@
-version: '3.8'
 
 services:
   traefik:
-    image: traefik:v3.0
+    image: traefik:v2.6
     container_name: traefik
-    restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "80:80"    # HTTP
+      - "443:443"  # HTTPS
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml
-      - ./traefik/acme.json:/letsencrypt/acme.json
-    networks:
-      - todos-app-network
+      - ./traefik/config:/etc/traefik/config
+      - ./traefik/acme:/etc/traefik/acme
     labels:
       - "traefik.enable=true"
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      # HTTP to HTTPS redirection
-      - "traefik.http.routers.http-catchall.rule=HostRegexp(`{any:.+}`)"
-      - "traefik.http.routers.http-catchall.entrypoints=web"
-      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-      # TLS settings
-      - "traefik.http.routers.traefik.tls=true"
-      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
-      - "traefik.http.routers.traefik.entrypoints=websecure"
-      # Let's Encrypt settings
-      - "--certificatesresolvers.myresolver.acme.email=ugerondu@gmail.com"
-      - "traefik.http.routers.traefik.service=api@internal"
-      - "traefik.http.routers.traefik.rule=Host(`traefik.glad.name.ng`)"
+      - "traefik.http.middlewares.auth.basicauth.users=admin:$$apr1$$ruca84Hq$$mbjdMZBAG.KWn7vfN/SNK/"  # admin:password
+    networks:
+      - todo-network
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
     env_file:
-      - .env
-    networks:
-      - todos-app-network
-    depends_on:
-      - auth-api
-      - todos-api
-      - users-api
+      - ./.env
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`glad.name.ng`)"
+      - "traefik.http.routers.frontend.rule=Host(`gladspace.site`)"
       - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.routers.frontend.tls=true"
       - "traefik.http.routers.frontend.tls.certresolver=myresolver"
+      - "traefik.http.routers.frontend.middlewares=global-middleware@file"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+    depends_on:
+      - auth-api
+      - users-api
+      - todos-api
+    networks:
+      - todo-network
 
   auth-api:
-    build: ./auth-api
+    build:
+      context: ./auth-api
+      dockerfile: Dockerfile
+    container_name: auth-api
     env_file:
-      - .env
-    networks:
-      - todos-app-network
+      - ./.env
+    environment:
+      - ZIPKIN_URL=http://zipkin:9411
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.auth.rule=Host(`auth.glad.name.ng`) || PathPrefix(`/api/auth`)"
-      - "traefik.http.routers.auth.entrypoints=websecure"
-      - "traefik.http.routers.auth.tls=true"
-      - "traefik.http.routers.auth.tls.certresolver=myresolver"
+      # Subdomain approach
+      - "traefik.http.routers.auth-api-domain.rule=Host(`auth.gladspace.site`)"
+      - "traefik.http.routers.auth-api-domain.entrypoints=websecure"
+      - "traefik.http.routers.auth-api-domain.tls=true"
+      - "traefik.http.routers.auth-api-domain.tls.certresolver=myresolver"
+      - "traefik.http.routers.auth-api-domain.middlewares=global-middleware@file"
+      # Path prefix approach
+      - "traefik.http.routers.auth-api-path.rule=Host(`gladspace.site`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth-api-path.entrypoints=websecure"
+      - "traefik.http.routers.auth-api-path.tls=true"
+      - "traefik.http.routers.auth-api-path.middlewares=auth-strip-prefix@file,global-middleware@file"
+      # Common configuration
+      - "traefik.http.services.auth-api.loadbalancer.server.port=8081"
     depends_on:
       - users-api
-
-  todos-api:
-    build: ./todos-api
-    env_file:
-      - .env
-    networks:
-      - todos-app-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.todos.rule=Host(`todos.glad.name.ng`) || PathPrefix(`/api/todos`)"
-      - "traefik.http.routers.todos.entrypoints=websecure"
-      - "traefik.http.routers.todos.tls=true"
-      - "traefik.http.routers.todos.tls.certresolver=myresolver"
-    depends_on:
       - redis-queue
+      - zipkin
+    networks:
+      - todo-network
 
   users-api:
-    build: ./users-api
+    build:
+      context: ./users-api
+      dockerfile: Dockerfile
+    container_name: users-api
     env_file:
-      - .env
-    networks:
-      - todos-app-network
+      - ./.env
+    environment:
+      - ZIPKIN_URL=http://zipkin:9411
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.users.rule=Host(`users.glad.name.ng`) || PathPrefix(`/api/users`)"
-      - "traefik.http.routers.users.entrypoints=websecure"
-      - "traefik.http.routers.users.tls=true"
-      - "traefik.http.routers.users.tls.certresolver=myresolver"
+      # Subdomain approach
+      - "traefik.http.routers.users-api-domain.rule=Host(`users.gladspace.site`)"
+      - "traefik.http.routers.users-api-domain.entrypoints=websecure"
+      - "traefik.http.routers.users-api-domain.tls=true"
+      - "traefik.http.routers.users-api-domain.tls.certresolver=myresolver"
+      - "traefik.http.routers.users-api-domain.middlewares=global-middleware@file"
+      # Path prefix approach
+      - "traefik.http.routers.users-api-path.rule=Host(`gladspace.site`) && PathPrefix(`/api/users`)"
+      - "traefik.http.routers.users-api-path.entrypoints=websecure"
+      - "traefik.http.routers.users-api-path.tls=true"
+      - "traefik.http.routers.users-api-path.middlewares=users-strip-prefix@file,global-middleware@file"
+      # Common configuration
+      - "traefik.http.services.users-api.loadbalancer.server.port=8083"
+    depends_on:
+      - redis-queue
+      - zipkin
+    networks:
+      - todo-network
+
+  todos-api:
+    build:
+      context: ./todos-api
+      dockerfile: Dockerfile
+    container_name: todos-api
+    env_file:
+      - ./.env
+    environment:
+      - ZIPKIN_URL=http://zipkin:9411
+    labels:
+      - "traefik.enable=true"
+      # Subdomain approach
+      - "traefik.http.routers.todos-api-domain.rule=Host(`todos.gladspace.site`)"
+      - "traefik.http.routers.todos-api-domain.entrypoints=websecure"
+      - "traefik.http.routers.todos-api-domain.tls=true"
+      - "traefik.http.routers.todos-api-domain.tls.certresolver=myresolver"
+      - "traefik.http.routers.todos-api-domain.middlewares=global-middleware@file"
+      # Path prefix approach
+      - "traefik.http.routers.todos-api-path.rule=Host(`gladspace.site`) && PathPrefix(`/api/todos`)"
+      - "traefik.http.routers.todos-api-path.entrypoints=websecure"
+      - "traefik.http.routers.todos-api-path.tls=true"
+      - "traefik.http.routers.todos-api-path.middlewares=todos-strip-prefix@file,global-middleware@file"
+      # Common configuration
+      - "traefik.http.services.todos-api.loadbalancer.server.port=8082"
+    depends_on:
+      - redis-queue
+      - zipkin
+    networks:
+      - todo-network
+
+  log-message-processor:
+    build:
+      context: ./log-message-processor
+      dockerfile: Dockerfile
+    container_name: log-message-processor
+    env_file:
+      - ./.env
+    environment:
+      - ZIPKIN_URL=http://zipkin:9411
+    depends_on:
+      - redis-queue
+      - zipkin
+    networks:
+      - todo-network
 
   redis-queue:
     image: redis:alpine
-    labels:
-      - "traefik.enable=false"
-    volumes:
-      - redis_data:/data
-
-  log-message-processor:
-    build: ./log-message-processor
-    labels:
-      - "traefik.enable=false"
-    env_file:
-      - .env
-    depends_on:
-      - redis-queue
+    container_name: redis-queue
+    networks:
+      - todo-network
 
   zipkin:
     image: openzipkin/zipkin
+    container_name: zipkin
     ports:
       - "9411:9411"
     networks:
-      - todos-app-network
+      - todo-network
 
 networks:
-  todos-app-network:
+  todo-network:
     driver: bridge
-
-volumes:
-  redis_data:

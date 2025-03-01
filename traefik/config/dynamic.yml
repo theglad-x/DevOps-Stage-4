@@ -1,0 +1,51 @@
+http:
+  middlewares:
+    security-headers:
+      headers:
+        browserXssFilter: true
+        contentTypeNosniff: true
+        frameDeny: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+        customFrameOptionsValue: "DENY"
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+    
+    cors-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        accessControlAllowOriginList:
+          - "https://gladspace.site"
+          - "https://auth.gladspace.site"
+          - "https://users.gladspace.site"
+          - "https://todos.gladspace.site"
+        accessControlAllowCredentials: true
+        accessControlMaxAge: 100
+        addVaryHeader: true
+    
+    auth-strip-prefix:
+      stripPrefix:
+        prefixes:
+          - "/api/auth"
+    
+    users-strip-prefix:
+      stripPrefix:
+        prefixes:
+          - "/api/users"
+    
+    todos-strip-prefix:
+      stripPrefix:
+        prefixes:
+          - "/api/todos"
+    
+    global-middleware:
+      chain:
+        middlewares:
+          - security-headers
+          - cors-headers
