@@ -13,10 +13,6 @@ RUN npm install
 # Copy the remaining code
 COPY . .
 
-# Copy .env file
-ENV  AUTH_API_ADDRESS=${AUTH_API_ADDRESS} \
-    TODOS_API_ADDRESS=${TODOS_API_ADDRESS}
-
 # Build the application
 RUN npm run build
 
